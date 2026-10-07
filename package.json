@@ -1,0 +1,19 @@
+{
+  "name": "stratforge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Trading Strategy Builder — backtesting, charts, and AI agent integration",
+  "scripts": {
+    "dev": "pnpm --filter @stratforge/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "demo": "pnpm --filter @stratforge/engine demo",
+    "desktop:dev": "pnpm --filter @stratforge/desktop dev:desktop",
+    "desktop:build": "pnpm --filter @stratforge/desktop build:desktop"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "packageManager": "pnpm@11.5.3"
+}

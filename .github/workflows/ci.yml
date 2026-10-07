@@ -1,0 +1,44 @@
+name: CI
+
+# Typecheck + smoke tests + web build on every push/PR.
+# Vite dev does NOT typecheck (esbuild strips types), so this is the only gate
+# that catches type errors and behavioural regressions. The Tauri desktop build
+# (Rust) is intentionally NOT built here — it needs the MSVC toolchain and is not
+# the thing most changes touch. See PROJECT_STATUS.md §4, §7.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        # version is read from the root package.json "packageManager" field
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (all packages)
+        run: pnpm -r typecheck
+
+      - name: Engine smoke (robustness battery)
+        run: pnpm --filter @stratforge/engine smoke
+
+      - name: Web smoke (csv, vault, isolation, chart, data-sources, optimize, llm-endpoint)
+        run: pnpm --filter @stratforge/web smoke
+
+      - name: Build web
+        run: pnpm --filter @stratforge/web build

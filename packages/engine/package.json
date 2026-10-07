@@ -1,0 +1,10 @@
+{
+  "name": "@stratforge/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit", "demo": "tsx scripts/demo.ts", "test": "tsx scripts/demo.ts", "smoke": "tsx scripts/demo.ts && tsx scripts/benchmark-smoke.ts && tsx scripts/outcomes-smoke.ts && tsx scripts/regimes-smoke.ts && tsx scripts/regime-filter-smoke.ts && tsx scripts/regime-mc-smoke.ts && tsx scripts/propfirm-smoke.ts && tsx scripts/verdict-smoke.ts && tsx scripts/features-smoke.ts && tsx scripts/tradelog-smoke.ts" },
+  "dependencies": { "@stratforge/dsl": "workspace:*" },
+  "devDependencies": { "tsx": "^4.19.0", "typescript": "^5.6.0" }
+}
