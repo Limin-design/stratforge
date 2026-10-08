@@ -34,6 +34,7 @@ import { runOptimization, summarizeOptimization } from "../panels/strategyOptimi
 import { fetchKlines, validateLoadRequest } from "../panels/dataSources.js";
 import { recordDataset } from "../usage.js";
 import { marketSnapshot } from "./marketSnapshot.js";
+import { kronosForecast, publishForecast } from "./kronos.js";
 
 const SECONDS_PER_YEAR = 365.25 * 24 * 3600;
 
@@ -66,6 +67,22 @@ export const TOOL_DEFS: ToolDef[] = [
       parameters: {
         type: "object",
         properties: { bars: { type: "number", description: "How many recent bars to include (1-300, default 50)." } },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forecast_kronos",
+      description:
+        "Forecast the next bars with Kronos, an open foundation model trained only on OHLCV candles, running locally on the user's computer. Uses the last 512 bars of the loaded dataset and draws the forecast on the chart. Returns the mean path of several samples. It is a statistical forecast, not validated on this asset here: present it as one input, never as a signal or a certainty. Fails if the user has not started the local Kronos server.",
+      parameters: {
+        type: "object",
+        properties: {
+          bars: { type: "number", description: "How many bars ahead to forecast (1-120, default 24)." },
+          samples: { type: "number", description: "Sampled paths to average (1-10, default 5). More is steadier but slower." },
+        },
         required: [],
       },
     },
@@ -335,6 +352,37 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
     case "get_live_market": {
       const snap = marketSnapshot(workspaceId, Number(args.bars ?? 50) || 50);
       return snap ?? { error: "No dataset loaded. Ask the user to pick a timeframe above the chart, or call load_data." };
+    }
+
+    case "forecast_kronos": {
+      const { candles, datasetName } = getState(workspaceId);
+      if (candles.length < 32) return { error: "Need at least 32 bars loaded to forecast. Ask the user to pick a timeframe above the chart." };
+      const bars = Math.max(1, Math.min(120, Math.floor(Number(args.bars ?? 24)) || 24));
+      const samples = Math.max(1, Math.min(10, Math.floor(Number(args.samples ?? 5)) || 5));
+      try {
+        const f = await kronosForecast(candles, bars, samples);
+        publishForecast({ ...f, dataset: datasetName, workspaceId });
+        const lastClose = candles[candles.length - 1].close;
+        const path = f.forecast.map((c) => c.close);
+        const end = path[path.length - 1];
+        const r = (v: number) => Math.round(v * 100) / 100;
+        return {
+          model: f.model,
+          dataset: datasetName,
+          basedOnBars: f.basedOnBars,
+          barsAhead: f.predLen,
+          samplesAveraged: f.samples,
+          lastClose: r(lastClose),
+          forecastEndClose: r(end),
+          forecastChangePct: r(((end - lastClose) / lastClose) * 100),
+          forecastHigh: r(Math.max(...f.forecast.map((c) => c.high))),
+          forecastLow: r(Math.min(...f.forecast.map((c) => c.low))),
+          closePath: path.map(r),
+          note: "Mean of sampled paths from a model trained only on candles. Not validated on this asset in this session; averaging samples hides their spread. Treat as one input and check it against a backtest.",
+        };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
     }
 
     case "get_context": {

@@ -31,6 +31,7 @@ import { RiskRewardPrimitive } from "./rrBox.js";
 import { DATA_INTERVALS } from "./dataSources.js";
 import { parseDatasetName, switchTimeframe, switchableIntervals } from "./timeframe.js";
 import { getLiveStatus, liveSupported, onLiveStatus, startLive, stopLive, type LiveStatus } from "./live.js";
+import { kronosForecast, onForecast, publishForecast } from "../agent/kronos.js";
 
 type Tool = "cursor" | "hline" | "trend" | "ray" | "rect";
 type MagnetMode = "off" | "weak" | "strong";
@@ -309,6 +310,8 @@ export function ChartPanel() {
   const recomputeRef = useRef<() => void>(() => {});
   const workspaceRef = useRef<string>("");
   const fitKeyRef = useRef<string>("");
+  const kronosRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const kronosKeyRef = useRef<string>("");
   const magnetHudRef = useRef<HTMLDivElement>(null);
   const undoStackRef = useRef<DrawingHistoryEntry[]>([]);
   const redoStackRef = useRef<DrawingHistoryEntry[]>([]);
@@ -331,6 +334,36 @@ export function ChartPanel() {
   useEffect(() => subscribe((s) => setDatasetName(s.datasetName)), []);
   const [live, setLive] = useState<LiveStatus>(getLiveStatus());
   useEffect(() => onLiveStatus(setLive), []);
+  const [kronosBusy, setKronosBusy] = useState(false);
+  // Draw the latest Kronos forecast (from the button or from the analyst) as a dashed path after the last bar.
+  useEffect(
+    () =>
+      onForecast((f) => {
+        const st = getState();
+        if (f.workspaceId !== getActiveWorkspaceId() || f.dataset !== st.datasetName || !kronosRef.current) return;
+        const last = st.candles[st.candles.length - 1];
+        const pts = f.forecast.filter((c) => !last || c.time > last.time).map((c) => ({ time: c.time as UTCTimestamp, value: c.close }));
+        if (last) pts.unshift({ time: last.time as UTCTimestamp, value: last.close });
+        kronosRef.current.setData(pts);
+        kronosKeyRef.current = f.dataset;
+      }),
+    []
+  );
+  const runKronos = async () => {
+    const workspaceId = getActiveWorkspaceId();
+    const st = getState(workspaceId);
+    setKronosBusy(true);
+    setTfNote("Kronos: forecasting the next 24 bars…");
+    try {
+      const f = await kronosForecast(st.candles, 24, 5);
+      publishForecast({ ...f, dataset: st.datasetName, workspaceId });
+      setTfNote(`Kronos: next ${f.predLen} bars in ${f.seconds ?? "?"}s (a model forecast, not a signal)`);
+    } catch (e) {
+      setTfNote(`Kronos: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setKronosBusy(false);
+    }
+  };
 
   const clearDraftDrawing = () => {
     if (previewHLineRef.current) {
@@ -444,6 +477,9 @@ export function ChartPanel() {
     });
     candleRef.current = candle;
     const equity = chart.addSeries(LineSeries, { color: "#8893a6", lineWidth: 1, priceScaleId: "equity", title: "equity" }, 1);
+    kronosRef.current = chart.addSeries(LineSeries, {
+      color: "#c9a96e", lineWidth: 2, lineStyle: LineStyle.Dashed, title: "Kronos", priceLineVisible: false,
+    });
     const markers = createSeriesMarkers(candle, []);
     const rrBox = new RiskRewardPrimitive(chart, candle);
     candle.attachPrimitive(rrBox);
@@ -943,6 +979,11 @@ export function ChartPanel() {
       const fitKey = `${workspaceId}|${s.datasetName}|${s.candles[0]?.time ?? ""}`;
       if (fitKeyRef.current !== fitKey) {
         fitKeyRef.current = fitKey;
+        // A different dataset makes the old forecast meaningless.
+        if (kronosKeyRef.current !== s.datasetName) {
+          kronosRef.current?.setData([]);
+          kronosKeyRef.current = "";
+        }
         chart.timeScale().fitContent();
       }
     };
@@ -1704,6 +1745,18 @@ export function ChartPanel() {
             }}
           >
             {live.state === "live" ? "● LIVE" : live.state === "connecting" ? "connecting…" : live.state === "reconnecting" ? "reconnecting…" : "○ live"}
+          </button>
+          <button
+            onClick={runKronos}
+            disabled={kronosBusy || datasetName === "(no dataset)"}
+            title="forecast the next 24 bars with Kronos, a model trained only on candles (runs on your computer)"
+            style={{
+              marginLeft: 6, padding: "3px 8px", fontSize: 11, borderRadius: 4, fontFamily: "inherit", cursor: "pointer",
+              border: "1px solid #c9a96e66", background: "transparent", color: "#c9a96e",
+              opacity: kronosBusy || datasetName === "(no dataset)" ? 0.45 : 1,
+            }}
+          >
+            {kronosBusy ? "Kronos…" : "Kronos"}
           </button>
           {live.state === "live" && live.lastPrice != null && (
             <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text)", fontFamily: "var(--font-mono)" }}>{live.lastPrice.toLocaleString("en-US")}</span>

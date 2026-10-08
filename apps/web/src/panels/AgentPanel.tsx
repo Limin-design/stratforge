@@ -49,7 +49,7 @@ const PRESETS: Record<string, string> = {
 
 const GREETING: Display = {
   role: "agent",
-  text: "Quant analyst online. Load a dataset, then describe a strategy or a factor idea — I'll build it, backtest it with realistic costs, and tell you honestly whether the edge is real or overfit. Configure your model/key below first (bring your own).",
+  text: "Analyst online. Load a dataset, then describe a strategy or a factor idea — I'll build it, backtest it with realistic costs, and tell you honestly whether the edge is real or overfit. Configure your model/key below first (bring your own).",
 };
 const SYSTEM_MSG: ChatMessage = { role: "system", content: SYSTEM_PROMPT };
 
@@ -316,7 +316,7 @@ ${JSON.stringify(snap)}`
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span className="cli-prompt" style={{ flex: 1 }}>
-          quant analyst {busy ? "— thinking…" : anyBusy ? "— another chat is running…" : ""} <span className="cli-shortcuts" style={{ marginLeft: 6 }}>Ctrl/Cmd+K focus · Ctrl/Cmd+Enter send</span>
+          the analyst {busy ? "— thinking…" : anyBusy ? "— another chat is running…" : ""} <span className="cli-shortcuts" style={{ marginLeft: 6 }}>Ctrl/Cmd+K focus · Ctrl/Cmd+Enter send</span>
         </span>
         <select
           className="cli-select"
