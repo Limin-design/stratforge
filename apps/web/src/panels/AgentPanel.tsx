@@ -61,7 +61,11 @@ export function AgentPanel() {
     const saved = getAgentConfig(workspaceId);
     return { baseUrl: saved.baseUrl, apiKey: "", model: saved.model };
   });
-  const [showSettings, setShowSettings] = useState(true);
+  // Start folded when a local server (no key needed) is already configured; otherwise show the setup.
+  const [showSettings, setShowSettings] = useState(() => {
+    const saved = getAgentConfig(getActiveId() ?? DEFAULT_WORKSPACE_ID);
+    return !(saved.model && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(saved.baseUrl.trim()));
+  });
   const [passphrase, setPassphrase] = useState("");
   const [locked, setLocked] = useState(() => hasVault(getActiveId() ?? DEFAULT_WORKSPACE_ID));
   const [vaultMsg, setVaultMsg] = useState<string | null>(() =>
@@ -78,6 +82,17 @@ export function AgentPanel() {
   const inflightRunRef = useRef<{ chatId: string; seq: number } | null>(null);
   const convoRef = useRef<ChatMessage[]>([SYSTEM_MSG]);
   const apiKeyRef = useRef("");
+
+  // Connected = a model is named and there is a key, or the endpoint is a local server that needs none.
+  const isLocalEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(config.baseUrl.trim());
+  const connected = Boolean(config.model.trim()) && (Boolean(config.apiKey) || isLocalEndpoint);
+  const endpointHost = (() => {
+    try {
+      return new URL(config.baseUrl).host;
+    } catch {
+      return config.baseUrl;
+    }
+  })();
 
   const busy = busyChatId === chatId;
   const anyBusy = busyChatId !== null;
@@ -173,6 +188,7 @@ export function AgentPanel() {
       });
       setLocked(false);
       setVaultMsg("unlocked — key decrypted in memory");
+      setShowSettings(false);
     } catch {
       setVaultMsg("wrong passphrase");
     }
@@ -188,6 +204,7 @@ export function AgentPanel() {
     saveVaultBlob(blob, workspaceId);
     setLocked(false);
     setVaultMsg("saved — encrypted on this device only (passphrase never stored)");
+    if (config.model.trim()) setShowSettings(false);
   };
 
   const forget = () => {
@@ -247,6 +264,7 @@ ${JSON.stringify(snap)}`
       saveChat(runChatId, runDisplay, runConvo);
     };
 
+    let hadError = false;
     try {
       const nextConvo = await runAgent(
         config,
@@ -256,9 +274,14 @@ ${JSON.stringify(snap)}`
         (e) => {
           if (e.type === "assistant") append({ role: "agent", text: e.text });
           else if (e.type === "tool_call") append({ role: "tool", text: `⚙ ${e.name}` });
-          else if (e.type === "error") append({ role: "error", text: e.text });
+          else if (e.type === "error") {
+            hadError = true;
+            append({ role: "error", text: e.text });
+          }
         }
       );
+      // The model answered, so the provider setup works: fold the settings away.
+      if (!hadError) setShowSettings(false);
       if (sameRun()) {
         runConvo = nextConvo;
         saveChat(runChatId, runDisplay, runConvo);
@@ -341,6 +364,18 @@ ${JSON.stringify(snap)}`
           {showSettings ? "hide" : "model"}
         </button>
       </div>
+
+      {!showSettings && (
+        <div className="cli-hint" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+          <span style={{ color: connected ? "#3fb27f" : "var(--text-dim)" }}>●</span>
+          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {connected ? `${config.model} · ${endpointHost}` : locked ? "key saved on this device: unlock it to connect" : "no model connected"}
+          </span>
+          <button className="cli-btn" style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => setShowSettings(true)}>
+            {connected ? "change" : "connect"}
+          </button>
+        </div>
+      )}
 
       {showSettings && (
         <div className="cli-box" style={{ gap: 6 }}>
