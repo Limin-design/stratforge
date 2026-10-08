@@ -28,6 +28,8 @@ import {
   translateDrawing,
 } from "./chartDrawingUtils.js";
 import { RiskRewardPrimitive } from "./rrBox.js";
+import { DATA_INTERVALS } from "./dataSources.js";
+import { parseDatasetName, switchTimeframe, switchableIntervals } from "./timeframe.js";
 
 type Tool = "cursor" | "hline" | "trend" | "ray" | "rect";
 type MagnetMode = "off" | "weak" | "strong";
@@ -321,6 +323,10 @@ export function ChartPanel() {
   const [addType, setAddType] = useState<IndType>("sma");
   const [addPeriod, setAddPeriod] = useState(20);
   const [, setSelectionNonce] = useState(0);
+  const [datasetName, setDatasetName] = useState(getState().datasetName);
+  const [tfBusy, setTfBusy] = useState(false);
+  const [tfNote, setTfNote] = useState("");
+  useEffect(() => subscribe((s) => setDatasetName(s.datasetName)), []);
 
   const clearDraftDrawing = () => {
     if (previewHLineRef.current) {
@@ -1630,6 +1636,46 @@ export function ChartPanel() {
     >
       {/* Indicator toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+        <div
+          role="group"
+          aria-label="candle timeframe"
+          title={switchableIntervals(datasetName).length ? "candle timeframe" : "load a crypto pair in the Data tab to switch timeframe"}
+          style={{ display: "inline-flex", alignItems: "center", gap: 2, borderRight: "1px solid var(--border)", paddingRight: 8 }}
+        >
+          {DATA_INTERVALS.map((iv) => {
+            const current = parseDatasetName(datasetName)?.interval === iv;
+            const enabled = !tfBusy && !current && switchableIntervals(datasetName).includes(iv);
+            return (
+              <button
+                key={iv}
+                disabled={!enabled}
+                aria-pressed={current}
+                onClick={async () => {
+                  setTfBusy(true);
+                  setTfNote(`loading ${iv}…`);
+                  try {
+                    const note = await switchTimeframe(datasetName, iv);
+                    if (note) setTfNote(note);
+                  } catch (e) {
+                    setTfNote(`error: ${e instanceof Error ? e.message : String(e)}`);
+                  } finally {
+                    setTfBusy(false);
+                  }
+                }}
+                style={{
+                  padding: "3px 7px", fontSize: 11, borderRadius: 4, fontFamily: "inherit",
+                  border: "1px solid " + (current ? "var(--accent)" : "transparent"),
+                  background: current ? "var(--accent-dim)" : "transparent",
+                  color: current ? "var(--text)" : enabled ? "var(--text-dim)" : "var(--border)",
+                  cursor: enabled ? "pointer" : "default",
+                }}
+              >
+                {iv}
+              </button>
+            );
+          })}
+          {tfNote && <span className="cli-hint" style={{ marginLeft: 6, fontSize: 11 }}>{tfNote}</span>}
+        </div>
         <select className="cli-select" value={addType} onChange={(e) => setAddType(e.target.value as IndType)} style={{ padding: "4px 6px" }}>
           {TYPES.map((t) => <option key={t}>{t}</option>)}
         </select>
