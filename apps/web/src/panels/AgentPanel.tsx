@@ -3,6 +3,8 @@ import { runAgent, type ChatMessage, type ProviderConfig } from "../agent/llmCli
 import { getAgentConfig, setAgentConfig, subscribeAgentConfig } from "../agent/config.js";
 import { SYSTEM_PROMPT } from "../agent/persona.js";
 import { executeTool, TOOL_DEFS } from "../agent/tools.js";
+import { marketSnapshot } from "../agent/marketSnapshot.js";
+import { getLiveStatus, onCandleClose, onLiveStatus, type LiveStatus } from "./live.js";
 import {
   clearVault,
   decryptJson,
@@ -208,8 +210,8 @@ export function AgentPanel() {
     saveActive([GREETING], [SYSTEM_MSG]);
   };
 
-  const send = async () => {
-    const text = input.trim();
+  const send = async (autoText?: string) => {
+    const text = (autoText ?? input).trim();
     if (!text || anyBusy) return;
     if (!config.model) {
       setShowSettings(true);
@@ -222,9 +224,17 @@ export function AgentPanel() {
     inflightRunRef.current = { chatId: runChatId, seq: runSeq };
     setBusyChatId(runChatId);
 
-    setInput("");
-    let runDisplay = [...messagesRef.current, { role: "user", text } as Display];
-    let runConvo = [...convoRef.current, { role: "user", content: text } as ChatMessage];
+    if (autoText === undefined) setInput("");
+    // The analyst always sees the current chart: attach a compact snapshot to the model's copy of the message.
+    const snap = marketSnapshot(runChatId, 20);
+    const content = snap
+      ? `${text}
+
+[Chart snapshot, attached automatically; current data, not written by the user]
+${JSON.stringify(snap)}`
+      : text;
+    let runDisplay = [...messagesRef.current, { role: "user", text: autoText ? "⟳ auto: new candle closed, analysing the chart" : text } as Display];
+    let runConvo = [...convoRef.current, { role: "user", content } as ChatMessage];
     applyMessages(runDisplay);
     convoRef.current = runConvo;
     saveChat(runChatId, runDisplay, runConvo);
@@ -266,6 +276,22 @@ export function AgentPanel() {
       }
     }
   };
+
+  // Watch mode: when live data closes a bar, the analyst gets a turn on its own.
+  const [watch, setWatch] = useState(false);
+  const [live, setLive] = useState<LiveStatus>(getLiveStatus());
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  useEffect(() => onLiveStatus(setLive), []);
+  useEffect(() => {
+    if (!watch) return;
+    return onCandleClose((c) => {
+      if (c.workspaceId !== chatIdRef.current) return;
+      void sendRef.current(
+        `A new candle just closed on ${c.dataset}. In two or three short lines: what changed (trend, momentum, volatility), and would the current strategy's trigger fire now? No trade advice.`
+      );
+    });
+  }, [watch]);
 
   const onPanelKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -406,13 +432,18 @@ export function AgentPanel() {
           value={input}
           disabled={anyBusy}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => e.key === "Enter" && void send()}
           placeholder="❯ describe a strategy or a factor idea…"
         />
-        <button className="cli-btn" onClick={send} disabled={anyBusy}>
+        <button className="cli-btn" onClick={() => void send()} disabled={anyBusy}>
           send
         </button>
       </div>
+      <label className="cli-hint" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+        <input type="checkbox" checked={watch} onChange={(e) => setWatch(e.target.checked)} />
+        watch the chart: comment on every closed candle (uses your model credits)
+        {watch && live.state === "off" && <span style={{ color: "var(--text-dim)" }}>· turn on live above the chart</span>}
+      </label>
     </div>
   );
 }

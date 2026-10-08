@@ -33,6 +33,7 @@ import { addCustomStat, getActiveWorkspaceId, getState, setState, type Workspace
 import { runOptimization, summarizeOptimization } from "../panels/strategyOptimize.js";
 import { fetchKlines, validateLoadRequest } from "../panels/dataSources.js";
 import { recordDataset } from "../usage.js";
+import { marketSnapshot } from "./marketSnapshot.js";
 
 const SECONDS_PER_YEAR = 365.25 * 24 * 3600;
 
@@ -54,6 +55,19 @@ export const TOOL_DEFS: ToolDef[] = [
       description:
         "Get the currently loaded dataset (instrument, bar count, date range) and the list of indicators you may use with their parameters. Call this first so you never reference data or indicators that don't exist.",
       parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_live_market",
+      description:
+        "Get a fresh snapshot of the chart right now: dataset, last price, the latest bars (OHLCV), SMA20/SMA50/RSI14/ATR14 and whether the data is streaming live. Every user message already carries a 20-bar snapshot; call this for fresher data mid-analysis or for more bars.",
+      parameters: {
+        type: "object",
+        properties: { bars: { type: "number", description: "How many recent bars to include (1-300, default 50)." } },
+        required: [],
+      },
     },
   },
   {
@@ -318,6 +332,11 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
   const trials = workspaceCounters(workspaceId);
 
   switch (name) {
+    case "get_live_market": {
+      const snap = marketSnapshot(workspaceId, Number(args.bars ?? 50) || 50);
+      return snap ?? { error: "No dataset loaded. Ask the user to pick a timeframe above the chart, or call load_data." };
+    }
+
     case "get_context": {
       const { candles, datasetName } = getState(workspaceId);
       const indicators = Object.fromEntries(

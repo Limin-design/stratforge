@@ -30,6 +30,7 @@ import {
 import { RiskRewardPrimitive } from "./rrBox.js";
 import { DATA_INTERVALS } from "./dataSources.js";
 import { parseDatasetName, switchTimeframe, switchableIntervals } from "./timeframe.js";
+import { getLiveStatus, liveSupported, onLiveStatus, startLive, stopLive, type LiveStatus } from "./live.js";
 
 type Tool = "cursor" | "hline" | "trend" | "ray" | "rect";
 type MagnetMode = "off" | "weak" | "strong";
@@ -307,6 +308,7 @@ export function ChartPanel() {
   const indsRef = useRef<AddedInd[]>([]);
   const recomputeRef = useRef<() => void>(() => {});
   const workspaceRef = useRef<string>("");
+  const fitKeyRef = useRef<string>("");
   const magnetHudRef = useRef<HTMLDivElement>(null);
   const undoStackRef = useRef<DrawingHistoryEntry[]>([]);
   const redoStackRef = useRef<DrawingHistoryEntry[]>([]);
@@ -327,6 +329,8 @@ export function ChartPanel() {
   const [tfBusy, setTfBusy] = useState(false);
   const [tfNote, setTfNote] = useState("");
   useEffect(() => subscribe((s) => setDatasetName(s.datasetName)), []);
+  const [live, setLive] = useState<LiveStatus>(getLiveStatus());
+  useEffect(() => onLiveStatus(setLive), []);
 
   const clearDraftDrawing = () => {
     if (previewHLineRef.current) {
@@ -935,7 +939,12 @@ export function ChartPanel() {
       } else {
         rrBox.setData(null);
       }
-      chart.timeScale().fitContent();
+      // Fit only when a different dataset arrives, so live ticks keep the user's zoom and scroll.
+      const fitKey = `${workspaceId}|${s.datasetName}|${s.candles[0]?.time ?? ""}`;
+      if (fitKeyRef.current !== fitKey) {
+        fitKeyRef.current = fitKey;
+        chart.timeScale().fitContent();
+      }
     };
 
     render(getState(), getActiveWorkspaceId());
@@ -1654,8 +1663,11 @@ export function ChartPanel() {
                   setTfBusy(true);
                   setTfNote(`loading ${iv}…`);
                   try {
+                    const wasLive = live.state !== "off";
                     const note = await switchTimeframe(datasetName, iv);
                     if (note) setTfNote(note);
+                    // Keep streaming across a timeframe change (the new dataset ends the old stream).
+                    if (wasLive) startLive(getActiveWorkspaceId());
                   } catch (e) {
                     setTfNote(`error: ${e instanceof Error ? e.message : String(e)}`);
                   } finally {
@@ -1675,6 +1687,27 @@ export function ChartPanel() {
               </button>
             );
           })}
+          <button
+            onClick={() => {
+              if (live.state !== "off") stopLive();
+              else setTfNote(startLive(getActiveWorkspaceId()) ?? "");
+            }}
+            disabled={live.state === "off" && !liveSupported(datasetName)}
+            title={liveSupported(datasetName) ? "stream live candles from Binance" : "live data needs a Binance pair: pick a timeframe first"}
+            aria-pressed={live.state !== "off"}
+            style={{
+              marginLeft: 6, padding: "3px 8px", fontSize: 11, borderRadius: 4, fontFamily: "inherit", cursor: "pointer",
+              border: "1px solid " + (live.state === "live" ? "#3fb27f" : "var(--border)"),
+              background: live.state === "live" ? "rgba(63,178,127,0.15)" : "transparent",
+              color: live.state === "live" ? "#3fb27f" : "var(--text-dim)",
+              opacity: live.state === "off" && !liveSupported(datasetName) ? 0.45 : 1,
+            }}
+          >
+            {live.state === "live" ? "● LIVE" : live.state === "connecting" ? "connecting…" : live.state === "reconnecting" ? "reconnecting…" : "○ live"}
+          </button>
+          {live.state === "live" && live.lastPrice != null && (
+            <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text)", fontFamily: "var(--font-mono)" }}>{live.lastPrice.toLocaleString("en-US")}</span>
+          )}
           {tfNote && <span className="cli-hint" style={{ marginLeft: 6, fontSize: 11 }}>{tfNote}</span>}
         </div>
         <select className="cli-select" value={addType} onChange={(e) => setAddType(e.target.value as IndType)} style={{ padding: "4px 6px" }}>
