@@ -23,9 +23,17 @@ export function parseDatasetName(name: string): DatasetRef | null {
   return { symbol, interval, exchange: exchange as Exchange };
 }
 
+// With nothing loaded yet, a timeframe click starts on a liquid default pair.
+const NO_DATASET = "(no dataset)";
+const DEFAULT_PAIR: Omit<DatasetRef, "interval"> = { symbol: "BTCUSDT", exchange: "Binance" };
+
+function resolve(name: string): Omit<DatasetRef, "interval"> | null {
+  return parseDatasetName(name) ?? (name === NO_DATASET ? DEFAULT_PAIR : null);
+}
+
 /** Intervals the dataset's exchange offers; empty when the dataset can't be reloaded here. */
 export function switchableIntervals(name: string): string[] {
-  const ref = parseDatasetName(name);
+  const ref = resolve(name);
   if (!ref) return [];
   return DATA_INTERVALS.filter((iv) => IV[ref.exchange][iv] != null);
 }
@@ -34,7 +42,7 @@ let loadSeq = 0;
 
 /** Reload the active workspace's dataset at `interval`. Resolves to a status line. */
 export async function switchTimeframe(name: string, interval: string): Promise<string> {
-  const ref = parseDatasetName(name);
+  const ref = resolve(name);
   if (!ref) return "load a crypto pair in the Data tab to switch timeframe";
   if (IV[ref.exchange][interval] == null) return `${ref.exchange} doesn't offer the ${interval} timeframe`;
   const workspaceId = getActiveWorkspaceId();

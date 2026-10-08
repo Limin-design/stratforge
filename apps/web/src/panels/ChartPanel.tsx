@@ -1666,7 +1666,8 @@ export function ChartPanel() {
                   padding: "3px 7px", fontSize: 11, borderRadius: 4, fontFamily: "inherit",
                   border: "1px solid " + (current ? "var(--accent)" : "transparent"),
                   background: current ? "var(--accent-dim)" : "transparent",
-                  color: current ? "var(--text)" : enabled ? "var(--text-dim)" : "var(--border)",
+                  color: current ? "var(--text)" : "var(--text-dim)",
+                  opacity: enabled || current ? 1 : 0.45,
                   cursor: enabled ? "pointer" : "default",
                 }}
               >
