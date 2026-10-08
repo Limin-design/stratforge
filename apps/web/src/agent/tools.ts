@@ -76,12 +76,12 @@ export const TOOL_DEFS: ToolDef[] = [
     function: {
       name: "forecast_kronos",
       description:
-        "Forecast the next bars with Kronos, an open foundation model trained only on OHLCV candles, running locally on the user's computer. Uses the last 512 bars of the loaded dataset and draws the forecast on the chart. Returns the mean path of several samples. It is a statistical forecast, not validated on this asset here: present it as one input, never as a signal or a certainty. Fails if the user has not started the local Kronos server.",
+        "Forecast the next bars with Kronos, an open foundation model trained only on OHLCV candles, running locally on the user's computer. Uses the last 512 bars of the loaded dataset and draws the forecast on the chart. Samples many future paths and returns their median, the 10th-90th percentile band and the share of paths that end up. It is a statistical forecast: present it as one input with its spread, never as a signal or a certainty. Fails if the user has not started the local Kronos server.",
       parameters: {
         type: "object",
         properties: {
           bars: { type: "number", description: "How many bars ahead to forecast (1-120, default 24)." },
-          samples: { type: "number", description: "Sampled paths to average (1-10, default 5). More is steadier but slower." },
+          samples: { type: "number", description: "Sampled paths (1-50, default 20). More gives a steadier band but takes longer." },
         },
         required: [],
       },
@@ -358,7 +358,7 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
       const { candles, datasetName } = getState(workspaceId);
       if (candles.length < 32) return { error: "Need at least 32 bars loaded to forecast. Ask the user to pick a timeframe above the chart." };
       const bars = Math.max(1, Math.min(120, Math.floor(Number(args.bars ?? 24)) || 24));
-      const samples = Math.max(1, Math.min(10, Math.floor(Number(args.samples ?? 5)) || 5));
+      const samples = Math.max(1, Math.min(50, Math.floor(Number(args.samples ?? 20)) || 20));
       try {
         const f = await kronosForecast(candles, bars, samples);
         publishForecast({ ...f, dataset: datasetName, workspaceId });
@@ -371,14 +371,16 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
           dataset: datasetName,
           basedOnBars: f.basedOnBars,
           barsAhead: f.predLen,
-          samplesAveraged: f.samples,
+          samples: f.samples,
+          probUp: f.probUp ?? null,
+          endBand10to90: f.band?.length ? [r(f.band[f.band.length - 1].p10), r(f.band[f.band.length - 1].p90)] : null,
           lastClose: r(lastClose),
           forecastEndClose: r(end),
           forecastChangePct: r(((end - lastClose) / lastClose) * 100),
           forecastHigh: r(Math.max(...f.forecast.map((c) => c.high))),
           forecastLow: r(Math.min(...f.forecast.map((c) => c.low))),
           closePath: path.map(r),
-          note: "Mean of sampled paths from a model trained only on candles. Not validated on this asset in this session; averaging samples hides their spread. Treat as one input and check it against a backtest.",
+          note: "Median of sampled paths from a model trained only on candles; the band holds the middle 80% of paths. Out-of-sample on BTC (Sep 2025 - Oct 2026, about 400 forecasts per setting) it had no reliable directional edge, 'no change' beat its move size, probUp was overconfident, and the band held the real price only 28-61% of the time instead of 80%. Say this when you report it, treat the band as too narrow, and never present the forecast as a signal.",
         };
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) };

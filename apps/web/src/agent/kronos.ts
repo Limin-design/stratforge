@@ -6,16 +6,30 @@ import type { Candle } from "@stratforge/engine";
 const URL_KEY = "stratforge.kronosUrl";
 const DEFAULT_URL = "http://127.0.0.1:8765";
 
+export interface BandPoint {
+  time: number;
+  p10: number;
+  p50: number;
+  p90: number;
+}
+
 export interface KronosForecast {
   model: string;
   basedOnBars: number;
   predLen: number;
   samples: number;
+  device?: string;
   seconds?: number;
-  forecast: Candle[];
+  forecast: Candle[]; // median of the sampled paths
+  band?: BandPoint[]; // close percentiles across the paths, per bar
+  probUp?: number; // share of paths that end above the last close
 }
 
 export function kronosUrl(): string {
+  // Served by the Kronos server itself (http://127.0.0.1:8765/stratforge/): same origin, no local-network prompt.
+  if (typeof location !== "undefined" && location.port === "8765" && /^(127\.0\.0\.1|localhost)$/.test(location.hostname)) {
+    return location.origin;
+  }
   try {
     return localStorage.getItem(URL_KEY) || DEFAULT_URL;
   } catch {
@@ -33,7 +47,7 @@ export async function kronosHealth(): Promise<{ ok: boolean; model?: string }> {
 }
 
 /** Ask Kronos for the next `predLen` bars after `candles` (the last 512 are used). */
-export async function kronosForecast(candles: Candle[], predLen = 24, samples = 5): Promise<KronosForecast> {
+export async function kronosForecast(candles: Candle[], predLen = 24, samples = 20): Promise<KronosForecast> {
   let r: Response;
   try {
     r = await fetch(`${kronosUrl()}/forecast`, {
@@ -44,7 +58,7 @@ export async function kronosForecast(candles: Candle[], predLen = 24, samples = 
     });
   } catch {
     throw new Error(
-      `not reachable at ${kronosUrl()}: start the local server (tools/kronos-server) and allow local access if the browser asks`
+      `not reachable at ${kronosUrl()}. Start the local server (tools/kronos-server) and open StratForge from it at http://127.0.0.1:8765/stratforge/`
     );
   }
   const body = (await r.json().catch(() => ({}))) as KronosForecast & { error?: string };

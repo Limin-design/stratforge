@@ -311,6 +311,8 @@ export function ChartPanel() {
   const workspaceRef = useRef<string>("");
   const fitKeyRef = useRef<string>("");
   const kronosRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const kronosLoRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const kronosHiRef = useRef<ISeriesApi<"Line"> | null>(null);
   const kronosKeyRef = useRef<string>("");
   const magnetHudRef = useRef<HTMLDivElement>(null);
   const undoStackRef = useRef<DrawingHistoryEntry[]>([]);
@@ -342,9 +344,15 @@ export function ChartPanel() {
         const st = getState();
         if (f.workspaceId !== getActiveWorkspaceId() || f.dataset !== st.datasetName || !kronosRef.current) return;
         const last = st.candles[st.candles.length - 1];
-        const pts = f.forecast.filter((c) => !last || c.time > last.time).map((c) => ({ time: c.time as UTCTimestamp, value: c.close }));
-        if (last) pts.unshift({ time: last.time as UTCTimestamp, value: last.close });
-        kronosRef.current.setData(pts);
+        const after = (t: number) => !last || t > last.time;
+        const start = last ? [{ time: last.time as UTCTimestamp, value: last.close }] : [];
+        const line = (pick: (i: number) => { time: number; value: number } | null) =>
+          [...start, ...f.forecast.map((_, i) => pick(i)).filter((p): p is { time: number; value: number } => !!p && after(p.time))]
+            .map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
+        kronosRef.current.setData(line((i) => ({ time: f.forecast[i].time, value: f.forecast[i].close })));
+        // The band holds 80% of the sampled paths: the 10th and 90th percentile of the close at each bar.
+        kronosLoRef.current?.setData(f.band ? line((i) => (f.band![i] ? { time: f.band![i].time, value: f.band![i].p10 } : null)) : []);
+        kronosHiRef.current?.setData(f.band ? line((i) => (f.band![i] ? { time: f.band![i].time, value: f.band![i].p90 } : null)) : []);
         kronosKeyRef.current = f.dataset;
       }),
     []
@@ -353,11 +361,12 @@ export function ChartPanel() {
     const workspaceId = getActiveWorkspaceId();
     const st = getState(workspaceId);
     setKronosBusy(true);
-    setTfNote("Kronos: forecasting the next 24 bars…");
+    setTfNote("Kronos · sampling 20 paths…");
     try {
-      const f = await kronosForecast(st.candles, 24, 5);
+      const f = await kronosForecast(st.candles, 24, 20);
       publishForecast({ ...f, dataset: st.datasetName, workspaceId });
-      setTfNote(`Kronos: next ${f.predLen} bars in ${f.seconds ?? "?"}s (a model forecast, not a signal)`);
+      const up = f.probUp != null ? ` · ${Math.round(f.probUp * 100)}% end up` : "";
+      setTfNote(`Kronos · ${f.samples} paths${up} · ${f.seconds ?? "?"}s`);
     } catch (e) {
       setTfNote(`Kronos: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -480,6 +489,12 @@ export function ChartPanel() {
     kronosRef.current = chart.addSeries(LineSeries, {
       color: "#c9a96e", lineWidth: 2, lineStyle: LineStyle.Dashed, title: "Kronos", priceLineVisible: false,
     });
+    const bandOpts = {
+      color: "rgba(201,169,110,0.55)", lineWidth: 1 as const, lineStyle: LineStyle.Dotted,
+      priceLineVisible: false, lastValueVisible: true, crosshairMarkerVisible: false,
+    };
+    kronosHiRef.current = chart.addSeries(LineSeries, { ...bandOpts, title: "p90" });
+    kronosLoRef.current = chart.addSeries(LineSeries, { ...bandOpts, title: "p10" });
     const markers = createSeriesMarkers(candle, []);
     const rrBox = new RiskRewardPrimitive(chart, candle);
     candle.attachPrimitive(rrBox);
@@ -982,6 +997,8 @@ export function ChartPanel() {
         // A different dataset makes the old forecast meaningless.
         if (kronosKeyRef.current !== s.datasetName) {
           kronosRef.current?.setData([]);
+          kronosLoRef.current?.setData([]);
+          kronosHiRef.current?.setData([]);
           kronosKeyRef.current = "";
         }
         chart.timeScale().fitContent();
@@ -1749,7 +1766,7 @@ export function ChartPanel() {
           <button
             onClick={runKronos}
             disabled={kronosBusy || datasetName === "(no dataset)"}
-            title="forecast the next 24 bars with Kronos, a model trained only on candles (runs on your computer)"
+            title="Kronos (runs on your computer): 20 sampled paths for the next 24 bars; dashed = median, dotted = the model's middle 80%. On BTC it showed no directional edge and its band was too narrow: a view of the model, not a signal."
             style={{
               marginLeft: 6, padding: "3px 8px", fontSize: 11, borderRadius: 4, fontFamily: "inherit", cursor: "pointer",
               border: "1px solid #c9a96e66", background: "transparent", color: "#c9a96e",
